@@ -205,39 +205,61 @@ All under `/api`. Mutations need `X-Workspace: 1`.
 
 ```
 shared/   types.ts · text.ts (words, scenes, offset-preserving tokenizer) · anchor.ts · diff.ts
+          quote.ts (placing quoted passages) · aiReply.ts (reading pasted AI replies)
 server/   project.ts (layout, layers) · fsutil.ts · git.ts · chapters.ts · versions.ts
           comments.ts · commentStore.ts · approvals.ts · reference.ts · importer.ts
-          export.ts · docx.ts · convert.ts · app.ts (HTTP) · index.ts · ai/{types,context,index}.ts
+          export.ts · docx.ts · convert.ts · app.ts (HTTP) · index.ts · mcp.ts (Claude connector)
+          ai/{types,context,index}.ts
 src/      App.tsx · api.ts · ui.tsx · markdown.ts · paste.ts (rich paste → Markdown) · styles.css
           components/ Sidebar · ChapterView · Reader · Editor · CommentsPanel
                       ContinuityPanel · ReferencePicker · HistoryView · DiffView
                       LibraryView · ProposalsView · ApprovalDialog · FilePicker
-scripts/  setup · init-project · import · backup · export · demo · dev
+scripts/  setup · init-project · import · backup · export · demo · dev · connect-claude
 tests/    text · anchor · diff · workspace · redevelopment (end-to-end over HTTP and real Git)
           fixtures/ — .docx files from three producers, with the script that makes them
 ```
 
-## Future AI editor
+## AI editors
 
-The seam is `server/ai/`:
+AI editors are contributors with the role `ai`. Whatever route they come by, their
+output is an `EditorialComment`: a category, the quoted passage, the note,
+reasoning, an optional `suggestedText` and cited sources. It enters the draft only
+through `acceptSuggestion()`, which snapshots the chapter as a `pre-ai` version
+first. No route gives an AI write access to chapter text, canon or approvals.
 
-- `types.ts` defines `EditorialAssistant`: `reviewPassage`, `suggestRewrite`,
-  `checkContinuity`, `compareScenes`. Each returns `AISuggestion`s carrying a
-  category, a range, the observation, **mandatory reasoning**, an optional
-  replacement text and cited sources.
-- `context.ts` builds the context in order of authority, labels every excerpt with its
-  layer, excludes legacy text by default, and attaches ground rules: propose, never
-  decide; say when a fact isn't established; cite sources.
-- `index.ts` returns the active provider. Today that's `none`, so the workspace runs
-  fully without AI.
+**1. Claude desktop connector** (`server/mcp.ts`, set up by `npm run connect-claude`).
+This is a Model Context Protocol server over stdio, using
+`@modelcontextprotocol/sdk`, and it runs under the author's Claude subscription
+(no API key). Its tools are `get_project_overview`, `read_chapter`,
+`read_reference_file`, `search_references`, `list_notes`, `add_note` and
+`reply_to_note`. Its server instructions carry the ground rules: authority order,
+the redevelopment, never invent canon, always give reasoning.
 
-To add a provider: implement the interface, return it from `getAssistant()`, and add
-routes that store each suggestion through `createComment()` with `role: "ai"`. The
-existing UI already shows AI notes as *Suggestion*, with their reasoning, and their
-wording reaches the draft only through **Accept into draft…**. That path snapshots
-the chapter as "Before AI-assisted revision" first. Comparing two scenes and
-reviewing dialogue, pacing or psychology are the same pattern with a different
-`focus`.
+- **Single writer.** The connector is a client of the workspace's HTTP API: if the
+  workspace is running it uses it, and otherwise it starts it in-process. All
+  writes therefore pass through the same lock, checks and Git commits. If the
+  running workspace has a different project open, it refuses.
+- **Placing notes.** `add_note` places the note with `shared/quote.ts`. That
+  ignores Markdown emphasis, curly versus straight quotes, dashes and whitespace,
+  and accepts "opening … closing". It refuses rather than guesses when the quote
+  is missing or not unique.
+- **Installing.** `connect-claude` merges one entry into
+  `claude_desktop_config.json`, backing up the file first. The entry uses
+  absolute paths to `node` and `tsx`. A file it can't parse is refused, not
+  overwritten.
+
+**2. Copy and paste** (`src/aiPrompt.ts`, `shared/aiReply.ts`, `src/components/AskAI.tsx`)
+works with any assistant. The request carries the chapter, the focus passage,
+directives and canon (in order of authority, capped at 300,000 characters),
+the ground rules and a `NOTE … END NOTE` reply format. The parser tolerates
+chat-app formatting such as bold labels and bullets. Unplaceable quotes are
+reported. They're attached to the asked-about passage only if the author agrees,
+and then without their rewrite.
+
+**3. API integration (not built).** `server/ai/` keeps the provider seam
+(`EditorialAssistant`, `buildContext()` with authority ordering) for one-click
+reviews inside the workspace using an Anthropic API key, billed separately from
+a Claude subscription.
 
 ## Deliberately not in this version
 
@@ -248,4 +270,4 @@ reviewing dialogue, pacing or psychology are the same pattern with a different
   text editor; the workspace records the change on its next start.
 - Reading `.pdf` reference files. They're stored and listed but not searchable;
   convert them to Markdown or Word to make them readable.
-- Any AI provider (see above).
+- One-click AI reviews inside the workspace via an API key (see "AI editors").

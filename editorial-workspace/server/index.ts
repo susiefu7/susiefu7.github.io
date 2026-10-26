@@ -25,7 +25,7 @@ try {
   app.listen(port, '127.0.0.1', (error?: Error) => {
     if (error) {
       const inUse = (error as NodeJS.ErrnoException).code === 'EADDRINUSE';
-      console.error(inUse ? `\nPort ${port} is already in use — is the workspace already running? Try --port 4318.\n` : `\n${error.message}\n`);
+      console.error(inUse ? `\nPort ${port} is already in use — the workspace is probably already running (the Claude desktop app starts it too).\nJust open http://localhost:${port} in your browser. To run a second copy, use --port 4318.\n` : `\n${error.message}\n`);
       process.exit(1);
     }
     console.log(`\n  The Long Picture — Editorial Workspace`);

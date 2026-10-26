@@ -149,7 +149,65 @@ and open <http://localhost:4317>.
 The workspace never writes chapter text for you. Approval is always a separate,
 explicit step.
 
-## 6. Backups
+## 6. Working with Claude (or ChatGPT)
+
+AI editors work like any other editor here. They read, comment and suggest; you
+decide. Their notes are marked **Suggestion** and show their reasoning. A suggested
+rewrite changes nothing until you click **Accept into draft…**, and the workspace
+then saves your previous text as "Before AI-assisted revision". AI editors cannot
+edit your chapters, change canon, approve anything or delete anything.
+
+### A. The Claude desktop app (uses your Claude Pro subscription)
+
+1. Install the **Claude desktop app** from <https://claude.ai/download> and sign in.
+2. In the `editorial-workspace` folder, run:
+
+   ```
+   npm run connect-claude
+   ```
+
+   This adds a connector called **the-long-picture** to Claude's settings. The
+   settings file is backed up first, and any other connectors are left alone.
+3. **Quit Claude completely and open it again.**
+4. Start a new chat and ask, for example:
+   - *"Using The Long Picture workspace, read Chapter 1 and check it against the
+     canon. Leave notes on anything that contradicts it."*
+   - *"Review the dialogue in Chapter 2's second scene and leave notes with
+     suggested rewrites."*
+   - *"Look at my reply on your note about the ferry and respond."*
+
+   The first time, Claude asks your permission before using the connector. You
+   can allow it once or always.
+5. Open <http://localhost:4317>. Claude's notes are in the **Notes** panel of the
+   chapter.
+
+While the Claude app is open it keeps the workspace running, so you don't also need
+`npm start`.
+
+Claude can read chapters (draft or approved), read and search the reference
+library, read existing notes, add notes and reply to notes. When the references
+don't establish something, it's instructed to say so rather than invent canon.
+
+- **Privacy:** what Claude reads is sent to Anthropic as part of your conversation,
+  just as if you had pasted it into Claude yourself.
+- **To disconnect:** remove the `the-long-picture` entry from Claude's settings
+  file (`claude_desktop_config.json`). Restore the backup if you prefer.
+- **If you move the `editorial-workspace` or `TheLongPicture` folder:** run
+  `npm run connect-claude` again.
+
+### B. Copy and paste (Claude.ai, ChatGPT or any assistant)
+
+1. Optionally select a passage, then in the **Notes** panel choose **Copy request…**.
+   Pick what you want: a passage review, rewrites, a continuity check, or a review
+   of the whole chapter. Add a question if you like.
+   The request includes the chapter, your directives and canon, the house rules
+   and a reply format. Historical and legacy files are left out.
+2. Paste it into a new chat at claude.ai or chatgpt.com.
+3. Copy the whole reply and choose **Paste reply…**. Each note in the reply is
+   attached to the passage it quotes. A note whose quote can't be found is never
+   guessed: you can attach it to the passage you asked about, or leave it out.
+
+## 7. Backups
 
 The project folder holds everything: text, notes, versions, approvals. Its full
 history is in the hidden `.git` folder inside it. Keep more than one copy:
@@ -175,7 +233,7 @@ Avoid putting the project in a folder that a sync service (Dropbox, iCloud Drive
 OneDrive) rewrites while the workspace is running. The workspace refuses to save
 over a file that changed underneath it, but sync conflicts are still best avoided.
 
-## 7. What protects the manuscript
+## 8. What protects the manuscript
 
 - **No silent overwrites.** Each save carries a fingerprint of the text it was based
   on. If the file changed meanwhile (another window, another editor), the save is
@@ -198,11 +256,11 @@ over a file that changed underneath it, but sync conflicts are still best avoide
 - **Local only.** The server listens only on `127.0.0.1` and rejects requests from
   other websites.
 
-## 8. Development
+## 9. Development
 
 ```bash
 npm run dev         # API with auto-restart + Vite dev server on http://localhost:5173
-npm test            # 58 automated tests (text model, anchoring, diff, .docx reading, full API over real Git)
+npm test            # 75 automated tests (text model, anchoring, diff, .docx, full API over real Git, the Claude connector over MCP)
 npm run typecheck
 npm run build       # production UI into dist/
 ```
@@ -214,5 +272,9 @@ npm run build       # production UI into dist/
 - **"The chapter on disk has changed since you opened it"** — the file was edited
   elsewhere. Choose **Load the newer version**; your text is offered back as recovered
   text so you can compare and merge.
+- **Claude doesn't show the connector** — quit Claude fully (not just close the
+  window) and reopen it. In Claude's settings, the Developer section lists local
+  connectors and any error. Check that `npm install` has been run, and re-run
+  `npm run connect-claude`.
 - **"No manuscript project found"** — run `npm run init-project`, or pass
   `--project` with the right folder.

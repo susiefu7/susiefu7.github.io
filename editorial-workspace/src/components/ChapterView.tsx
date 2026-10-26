@@ -7,6 +7,7 @@ import { countWords } from '../../shared/text';
 import { ApiError, api } from '../api';
 import { Modal, STATUS_LABELS, errorMessage, formatCount, formatDate, useNotify } from '../ui';
 import { ApprovalDialog } from './ApprovalDialog';
+import { AskAIModal, PasteReplyModal, type NoteToAdd, type Range } from './AskAI';
 import { CommentsPanel, type Composer } from './CommentsPanel';
 import { ContinuityPanel } from './ContinuityPanel';
 import { DiffView } from './DiffView';
@@ -54,7 +55,8 @@ export function ChapterView(props: Props) {
   const [readSel, setReadSel] = useState<ReaderSelection | null>(null);
   const [editSel, setEditSel] = useState({ start: 0, end: 0 });
   const [panel, setPanel] = useState<'notes' | 'continuity' | null>('notes');
-  const [modal, setModal] = useState<'version' | 'approve' | 'recovery' | 'import' | null>(null);
+  const [modal, setModal] = useState<'version' | 'approve' | 'recovery' | 'import' | 'ask' | 'paste' | null>(null);
+  const [aiSelection, setAiSelection] = useState<Range | null>(null);
   const [pendingAccept, setPendingAccept] = useState<EditorialComment | null>(null);
   const [jump, setJump] = useState<{ offset: number; nonce: number } | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -468,6 +470,30 @@ export function ChapterView(props: Props) {
           <div className="panel-body">
             {panel === 'notes' ? (
               <>
+                <div className="ai-bar">
+                  <span className="small muted">Claude or ChatGPT:</span>
+                  <button
+                    className="btn small"
+                    title="Copy a request with this chapter (or the selected passage) and your canon, to paste into Claude or ChatGPT"
+                    onClick={async () => {
+                      const sel = currentSelection();
+                      const saved = await save();
+                      if (!saved) return;
+                      setAiSelection(sel);
+                      setModal('ask');
+                    }}
+                  >
+                    Copy request…
+                  </button>
+                  <button
+                    className="btn small"
+                    onClick={async () => {
+                      if (await save()) setModal('paste');
+                    }}
+                  >
+                    Paste reply…
+                  </button>
+                </div>
                 {dirty && comments.length > 0 && (
                   <p className="hint">Highlights are hidden while there are unsaved changes; save to re-check note positions.</p>
                 )}
@@ -516,6 +542,37 @@ export function ChapterView(props: Props) {
         </aside>
       )}
 
+      {modal === 'ask' && <AskAIModal doc={doc} selection={aiSelection} onClose={() => setModal(null)} />}
+      {modal === 'paste' && (
+        <PasteReplyModal
+          doc={doc}
+          fallback={aiSelection}
+          busy={busy}
+          onClose={() => setModal(null)}
+          onAdd={(notes: NoteToAdd[]) =>
+            withBusy(async () => {
+              for (const n of notes) {
+                await api.createComment(chapterId, {
+                  start: n.start,
+                  end: n.end,
+                  baseHash: doc.hash,
+                  category: n.category,
+                  body: n.body,
+                  reasoning: n.reasoning,
+                  suggestedText: n.suggestedText,
+                  role: 'ai',
+                  by: n.by,
+                });
+              }
+              await loadComments();
+              onChaptersChanged();
+              setModal(null);
+              setPanel('notes');
+              notify(`${notes.length} AI note${notes.length === 1 ? '' : 's'} added. Nothing in the text has changed.`);
+            })
+          }
+        />
+      )}
       {modal === 'import' && (
         <ImportIntoChapterModal
           hasText={buffer.trim().length > 0}

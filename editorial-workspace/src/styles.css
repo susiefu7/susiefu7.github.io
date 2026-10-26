@@ -360,6 +360,16 @@ a {
   white-space: nowrap;
 }
 
+.ai-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+
 .edit-strip {
   display: flex;
   gap: 14px;
