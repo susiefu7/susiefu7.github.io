@@ -1,0 +1,5 @@
+node_modules/
+dist/
+# Local demo copy created by `npm run demo` — never commit manuscript data here.
+.demo-project/
+*.log
