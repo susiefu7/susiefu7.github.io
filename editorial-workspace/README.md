@@ -14,8 +14,9 @@ There is no cloud service, account or API key.
   rejected or deferred, and they record your final decision. They follow their
   passage through revisions, and are flagged when the passage changes.
 - **Canon & reference library:** read and search the canon, your directives, working
-  ideas and the legacy archive. Every result is labelled with its layer, so canon is
-  never confused with an idea or a superseded draft.
+  ideas, historical records and the legacy manuscript. Every result is labelled with
+  its layer, so canon is never confused with an idea, a pre-redevelopment record or an
+  old draft.
 - **Approval:** you approve a chapter explicitly. The approved text is frozen
   separately and is never overwritten. Proposed summary and continuity updates are
   drafted for you, and canon changes only after a separate confirmation.
@@ -49,57 +50,82 @@ Open <http://localhost:4317>. The demo uses invented sample material from
 `sample-project/` (not your novel), copied into `.demo-project/`. Delete that folder
 to start the demo afresh. Press `Ctrl+C` in the terminal to stop.
 
-## 3. Set up your manuscript project
+## 3. Set up The Long Picture for the redevelopment
 
 Your manuscript lives in its own folder, separate from this application. By default
 that folder is `~/TheLongPicture`. Use `--project <folder>` on any command (or set
 `TLP_PROJECT`) to use another location.
 
 ```bash
-# Create the project folder and its version history
-npm run init-project -- --title "The Long Picture" --author "Your Name"
+npm run setup -- --author "Your Name"
+```
 
-# Import your existing documents (copied unaltered; your originals are only read)
-npm run import -- canon       "/path/to/master canon, characters, style, briefs …"
-npm run import -- directives  "/path/to/current redevelopment instructions"   # optional
-npm run import -- ideas       "/path/to/working ideas"                          # optional
-npm run import -- legacy      "/path/to/previously approved chapters"
-npm run import -- chapters    "/path/to/current chapter drafts"
+This creates:
 
-# Start the workspace
+- the full folder layout, with an **empty manuscript**;
+- **Chapter 1, "Background"**: a blank page, marked *Working draft · not approved
+  canon*;
+- the **redevelopment flag**: older summaries, continuity records and drafts are shown
+  as historical references, not as binding canon.
+
+It writes no manuscript text and refuses to touch an existing project.
+
+Then bring in your reference files. You can do this from the terminal:
+
+```bash
+npm run import -- canon             "/path/to/project bible, canon, style guide, current continuity"
+npm run import -- historical        "/path/to/older chapter summaries and continuity records"
+npm run import -- legacy-manuscript "/path/to/older chapter drafts"
+npm run import -- directives        "/path/to/redevelopment instructions"   # optional
+npm run import -- ideas             "/path/to/working ideas"                # optional
+```
+
+Or do it in the app: **Canon & reference library → Add files…**, choosing which
+layer the files belong to. Then start the workspace:
+
+```bash
 npm start
 ```
 
-Then open <http://localhost:4317>.
+and open <http://localhost:4317>.
 
-**About the import:**
+**About adding reference files:**
 
-- Files are copied byte for byte, and a SHA-256 fingerprint of each is recorded. The
-  library shows *verified* for files unchanged since import, and *changed* if one
-  was later altered outside an author-confirmed update.
-- Nothing in the project is ever overwritten. If a file with the same name but
-  different content already exists, the importer lists it and leaves it alone.
-- Run imports while the workspace is stopped.
-- Text files (`.md`, `.markdown`, `.txt`) can be read and searched. Other files, such as
-  `.docx` or `.pdf`, are stored but can't be displayed or searched. Searches tell you
-  how many files they skipped, so "no results" is never claimed for files that
-  weren't read. To convert Word files: `pandoc file.docx -t gfm -o file.md`.
-- **Chapter drafts:** one file per chapter, with the chapter number in the file name
-  (e.g. `07 - The Screening.md`). A leading `# Title` line becomes the chapter title.
-- **Legacy chapters** go to `archive/legacy/`. You can read and search them and
-  compare them with the new drafts, but they are always labelled as not governing.
-  The rule is "newer author instructions override", so put those instructions in
-  `directives/`.
+- Files are stored byte for byte and are never altered. A SHA-256 fingerprint of each
+  is recorded, and the library shows *verified* for files unchanged since they were
+  added.
+- Nothing is ever replaced. A different file with the same name is refused and left
+  alone. Run command-line imports while the workspace is stopped.
+- `.md`, `.txt` and **`.docx`** files can be read and searched. Word files are
+  converted in memory for display; the stored `.docx` stays exactly as it was. Other
+  files, such as `.pdf`, are stored but not readable, and searches say how many files
+  they couldn't read.
+- **If a folder mixes categories**, for example current canon alongside old chapter
+  summaries, add it all to one layer. Then open a file and use **Move to…** to
+  reclassify it (canon → historical, for example). The file keeps its exact contents
+  and its history, and notes that cite it follow it. Moving a file into or out of
+  canon asks you to confirm.
+- **Historical** files (`historical/`) and **legacy manuscript** drafts
+  (`archive/legacy-manuscript/`) carry a notice that the novel is being redeveloped
+  and they don't govern the new chapters. You can still read, search and cite them,
+  and compare legacy drafts with new chapters in **History**.
+- If you later have chapter drafts to work on (not just to archive), use
+  `npm run import -- chapters <folder>`. One file per chapter, `.md`, `.txt` or `.docx`,
+  with the chapter number in the file name (e.g. `07 - The Screening.docx`). They
+  become working drafts; importing never approves anything.
 
 ## 4. Everyday use
 
 | To…                          | Do this                                                                                     |
 | ---------------------------- | ------------------------------------------------------------------------------------------- |
 | Read                          | Choose a chapter. **Read** mode shows the text as a book page. Scenes are listed under the chapter in the left column. |
-| Write                         | Switch to **Edit**. You are editing the Markdown directly: `*italic*`, `## Scene title`, `* * *` for a scene break. |
+| Write                         | Switch to **Edit** (empty chapters open there). You are editing the Markdown directly: `*italic*`, `## Scene title`, `* * *` for a scene break. |
+| Paste prose                   | Paste into the editor. Text from Word, Google Docs, Pages or a web page keeps its paragraphs, italics and bold. Plain text with one line per paragraph is spaced into paragraphs. `Ctrl/⌘ Z` undoes a paste. |
+| Bring in a file               | **Import file…** above the editor reads a `.md`, `.txt` or `.docx` and previews it. Add it after the draft, or replace the draft (the current text is saved as a named version first). |
 | Save                          | **Save** or `Ctrl/⌘ S`. Each save is recorded in the history. Unsaved text is also kept in a recovery copy every couple of seconds. |
 | Mark a milestone              | **Version…** gives the current text a name, e.g. "Draft 3 — before cutting the prologue". |
-| Compare                       | **History** opens the version list. Choose *Left* and *Right* on any two entries, including approved, superseded and legacy text. |
+| Compare                       | **History** opens the version list. Choose *Left* and *Right* on any two entries, including approved, superseded and legacy-manuscript text. |
+| Add or reclassify references  | **Canon & reference library → Add files…** to add; open a file and use **Move to…** to change its layer. |
 | Go back to an earlier text    | **History → Restore…**. The current draft is saved first as "Before restoring …", so a restore can itself be undone. |
 | Comment                       | Select a passage. In Read mode a **Comment** button appears; in Edit mode use **Comment** in the toolbar. Pick a type, write the note, and optionally cite a reference or suggest wording. |
 | Decide on a note              | Open the note and choose **Resolve**, **Reject** or **Defer**, with an optional decision note. Replies keep the discussion and any disagreement on record. |
@@ -110,12 +136,18 @@ Then open <http://localhost:4317>.
 
 ## 5. Adding chapters
 
-- **In the app:** **+ Chapter** in the left column. Choose a number and title.
+- **In the app:** **+ Chapter** in the left column (or **New chapter** when the
+  manuscript is empty). Choose a number and title, then start with an empty page or
+  from a `.md`, `.txt` or `.docx` file. Every new chapter is a working draft until you
+  approve it.
 - **By hand:** create `manuscript/chapters/ch12/chapter.md` in the project folder.
   The folder name gives the number. A leading `# Title` gives the title. The
   workspace records it in the history the next time it starts.
 - **From files:** `npm run import -- chapters <folder>`. Existing chapter numbers are
   never replaced.
+
+The workspace never writes chapter text for you. Approval is always a separate,
+explicit step.
 
 ## 6. Backups
 
@@ -170,7 +202,7 @@ over a file that changed underneath it, but sync conflicts are still best avoide
 
 ```bash
 npm run dev         # API with auto-restart + Vite dev server on http://localhost:5173
-npm test            # 45 automated tests (text model, anchoring, diff, full API over real Git)
+npm test            # 58 automated tests (text model, anchoring, diff, .docx reading, full API over real Git)
 npm run typecheck
 npm run build       # production UI into dist/
 ```

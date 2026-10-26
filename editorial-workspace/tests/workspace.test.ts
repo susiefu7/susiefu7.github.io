@@ -35,15 +35,20 @@ async function gitLog(): Promise<string[]> {
 
 describe('import', () => {
   test('reference files are copied byte for byte and the source is untouched', async () => {
-    for (const name of await fs.readdir(path.join(SAMPLE, 'canon'))) {
-      const original = await fs.readFile(path.join(SAMPLE, 'canon', name));
-      const copy = await fs.readFile(path.join(ws.root, 'canon', name));
-      assert.equal(sha256(copy), sha256(original), name);
+    const layers: [string, string][] = [['canon', 'canon'], ['historical', 'historical'], ['legacy-manuscript', 'archive/legacy-manuscript']];
+    let count = 0;
+    for (const [from, to] of layers) {
+      for (const name of await fs.readdir(path.join(SAMPLE, from))) {
+        const original = await fs.readFile(path.join(SAMPLE, from, name));
+        const copy = await fs.readFile(path.join(ws.root, to, name));
+        assert.equal(sha256(copy), sha256(original), name);
+        count++;
+      }
     }
     const { data: files } = await ws.api('GET', '/api/reference');
-    const canon = files.filter((f: any) => f.layer === 'canon');
-    assert.ok(canon.length >= 6);
-    assert.ok(canon.every((f: any) => f.integrity === 'verified'));
+    const imported = files.filter((f: any) => ['canon', 'historical', 'legacy'].includes(f.layer));
+    assert.equal(imported.length, count);
+    assert.ok(imported.every((f: any) => f.integrity === 'verified'));
   });
 
   test('re-importing never overwrites a different existing file', async () => {
@@ -282,7 +287,9 @@ describe('approval and canon proposals', () => {
   });
 
   test('approving freezes the text; later edits and re-approval never overwrite it', async () => {
-    const canonBefore = await fs.readFile(path.join(ws.root, 'canon/chapter-summaries.md'), 'utf8');
+    // Pre-redevelopment summaries are historical; canon has no summaries file yet.
+    const canonBefore = await fs.readFile(path.join(ws.root, 'canon/chapter-summaries.md'), 'utf8').catch(() => null);
+    const historicalBefore = await fs.readFile(path.join(ws.root, 'historical/chapter-summaries.md'), 'utf8');
     let doc = await chapter('ch02');
     const approvedText = doc.text;
     const r = await ws.api('POST', '/api/chapters/ch02/approve', { baseHash: doc.hash, confirm: true, note: 'First approval' });
@@ -291,7 +298,8 @@ describe('approval and canon proposals', () => {
     assert.equal(r.data.proposals.length, 2);
     assert.ok(r.data.proposals.every((p: any) => p.status === 'pending'));
     // Canon is untouched by approval itself.
-    assert.equal(await fs.readFile(path.join(ws.root, 'canon/chapter-summaries.md'), 'utf8'), canonBefore);
+    assert.equal(await fs.readFile(path.join(ws.root, 'canon/chapter-summaries.md'), 'utf8').catch(() => null), canonBefore);
+    assert.equal(await fs.readFile(path.join(ws.root, 'historical/chapter-summaries.md'), 'utf8'), historicalBefore);
     assert.match((await gitLog())[0], /^Approve: ch02/);
 
     // Experimenting with a rewrite leaves the approved text alone.
@@ -318,18 +326,27 @@ describe('approval and canon proposals', () => {
 
     await ws.api('PATCH', `/api/proposals/${summary.id}`, { content: '## Chapter 2: The Logbooks\n\nIris finds a gap in the logs.' });
     const target = path.join(ws.root, 'canon/chapter-summaries.md');
-    const before = await fs.readFile(target, 'utf8');
+    assert.equal(await fs.readFile(target, 'utf8').catch(() => null), null, 'a new canon file, not the historical one');
 
-    assert.equal((await ws.api('POST', `/api/proposals/${summary.id}/apply`, { expectedTargetHash: sha256(before) })).status, 400);
+    assert.equal((await ws.api('POST', `/api/proposals/${summary.id}/apply`, { expectedTargetHash: null })).status, 400);
     assert.equal((await ws.api('POST', `/api/proposals/${summary.id}/apply`, { confirm: true, expectedTargetHash: 'stale' })).status, 409);
-    assert.equal(await fs.readFile(target, 'utf8'), before);
+    assert.equal(await fs.readFile(target, 'utf8').catch(() => null), null);
 
     const { data: preview } = await ws.api('GET', `/api/proposals/${summary.id}/preview`);
     const ok = await ws.api('POST', `/api/proposals/${summary.id}/apply`, { confirm: true, expectedTargetHash: preview.currentHash });
     assert.equal(ok.status, 200);
     const after = await fs.readFile(target, 'utf8');
-    assert.ok(after.startsWith(before.trimEnd()));
-    assert.match(after, /Iris finds a gap in the logs/);
+    assert.match(after, /^## Chapter 2: The Logbooks\n\nIris finds a gap in the logs\.\n$/);
+
+    // A second confirmed update appends to it, leaving the earlier text intact.
+    const continuity = proposals.find((p: any) => p.kind === 'continuity' && p.status === 'pending');
+    await ws.api('PATCH', `/api/proposals/${continuity.id}`, { targetFile: 'canon/chapter-summaries.md', content: 'Second entry.' });
+    const { data: preview2 } = await ws.api('GET', `/api/proposals/${continuity.id}/preview`);
+    assert.equal(preview2.currentHash, sha256(after));
+    assert.equal((await ws.api('POST', `/api/proposals/${continuity.id}/apply`, { confirm: true, expectedTargetHash: preview2.currentHash })).status, 200);
+    const appended = await fs.readFile(target, 'utf8');
+    assert.ok(appended.startsWith(after.trimEnd()));
+    assert.match(appended, /Second entry\.\n$/);
     assert.match((await gitLog())[1], /Canon update \(author-confirmed\)/);
 
     // Integrity reflects the confirmed update rather than flagging it as tampering.

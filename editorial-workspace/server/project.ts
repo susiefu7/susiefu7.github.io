@@ -4,21 +4,25 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { Layer, ProjectInfo } from '../shared/types.ts';
+import type { Layer, ProjectInfo, Redevelopment } from '../shared/types.ts';
 import { HttpError, Mutex, exists, nowIso, readJson, resolveInside, writeJson } from './fsutil.ts';
 import { Git } from './git.ts';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** Folder for each layer of material. See docs/ARCHITECTURE.md. */
 export const LAYER_DIRS: Partial<Record<Layer, string>> = {
   canon: 'canon',
   directive: 'directives',
   idea: 'working-ideas',
+  historical: 'historical',
   approved: 'approved',
   superseded: 'archive/superseded',
-  legacy: 'archive/legacy',
+  legacy: 'archive/legacy-manuscript',
 };
+
+/** Folder used for legacy chapters by projects created before schema version 2. */
+const OLD_LEGACY_DIR = 'archive/legacy';
 
 /** Order of authority used when assembling context (e.g. for a future AI editor). */
 export const AUTHORITY_ORDER: Layer[] = ['directive', 'canon', 'approved'];
@@ -34,6 +38,24 @@ interface ProjectFile {
   schemaVersion: number;
   authorName: string;
   createdAt: string;
+  redevelopment?: Redevelopment;
+}
+
+const LAYOUT_DIRS = () => [
+  ...Object.values(LAYER_DIRS),
+  CHAPTERS_DIR,
+  `${EDITORIAL_DIR}/comments`,
+  `${EDITORIAL_DIR}/versions`,
+  `${EDITORIAL_DIR}/approvals`,
+  `${EDITORIAL_DIR}/proposals`,
+];
+
+async function ensureLayout(abs: string): Promise<void> {
+  for (const dir of LAYOUT_DIRS()) {
+    await fs.mkdir(path.join(abs, dir!), { recursive: true });
+    const keep = path.join(abs, dir!, '.gitkeep');
+    if (!(await exists(keep))) await fs.writeFile(keep, '');
+  }
 }
 
 export class Project {
@@ -64,28 +86,26 @@ export class Project {
     if (!(await project.git.isRepo())) await project.git.init();
     await project.git.ensureIdentity();
     await project.commitExternalChanges();
+    await project.migrate();
     return project;
   }
 
   /** Create the folder layout for a new, empty project. Refuses to touch an existing project. */
-  static async init(root: string, title: string, authorName = 'Author'): Promise<Project> {
+  static async init(
+    root: string,
+    title: string,
+    authorName = 'Author',
+    options: { redevelopment?: string | null } = {},
+  ): Promise<Project> {
     const abs = path.resolve(root);
     if (await exists(path.join(abs, 'project.json'))) {
       throw new Error(`A project already exists at ${abs}; nothing was changed.`);
     }
-    for (const dir of [
-      ...Object.values(LAYER_DIRS),
-      CHAPTERS_DIR,
-      `${EDITORIAL_DIR}/comments`,
-      `${EDITORIAL_DIR}/versions`,
-      `${EDITORIAL_DIR}/approvals`,
-      `${EDITORIAL_DIR}/proposals`,
-    ]) {
-      await fs.mkdir(path.join(abs, dir), { recursive: true });
-      const keep = path.join(abs, dir, '.gitkeep');
-      if (!(await exists(keep))) await fs.writeFile(keep, '');
-    }
+    await ensureLayout(abs);
     const config: ProjectFile = { title, schemaVersion: SCHEMA_VERSION, authorName, createdAt: nowIso() };
+    if (typeof options.redevelopment === 'string') {
+      config.redevelopment = { active: true, since: nowIso(), note: options.redevelopment };
+    }
     await writeJson(path.join(abs, 'project.json'), config);
     if (!(await exists(path.join(abs, '.gitignore')))) {
       await fs.writeFile(path.join(abs, '.gitignore'), `${RECOVERY_DIR}/\n*.tmp-*\n.DS_Store\n`);
@@ -107,7 +127,12 @@ export class Project {
       schemaVersion: this.config.schemaVersion,
       authorName: this.config.authorName,
       aiEnabled,
+      redevelopment: this.config.redevelopment ?? null,
     };
+  }
+
+  get redevelopmentActive(): boolean {
+    return this.config.redevelopment?.active === true;
   }
 
   get authorName(): string {
@@ -175,6 +200,36 @@ export class Project {
   }
 
   /**
+   * Bring an older project up to the current layout. Files are moved with their
+   * history (Git records the rename); nothing is deleted or rewritten.
+   */
+  private async migrate(): Promise<void> {
+    if (this.config.schemaVersion >= SCHEMA_VERSION) return;
+    const touched: string[] = ['project.json'];
+    const oldLegacy = path.join(this.root, OLD_LEGACY_DIR);
+    const newLegacy = path.join(this.root, LAYER_DIRS.legacy!);
+    if ((await exists(oldLegacy)) && !(await exists(newLegacy))) {
+      await fs.rename(oldLegacy, newLegacy);
+      touched.push(OLD_LEGACY_DIR, LAYER_DIRS.legacy!);
+      const manifestPath = path.join(this.root, this.manifestFile);
+      const manifest = await readJson<{ files: Record<string, unknown> }>(manifestPath, { files: {} });
+      const files: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(manifest.files)) {
+        files[key.startsWith(`${OLD_LEGACY_DIR}/`) ? `${LAYER_DIRS.legacy}/${key.slice(OLD_LEGACY_DIR.length + 1)}` : key] = value;
+      }
+      if (await exists(manifestPath)) {
+        await writeJson(manifestPath, { ...manifest, files });
+        touched.push(this.manifestFile);
+      }
+    }
+    await ensureLayout(this.root);
+    touched.push(...LAYOUT_DIRS().map((d) => d!));
+    this.config.schemaVersion = SCHEMA_VERSION;
+    await writeJson(path.join(this.root, 'project.json'), this.config);
+    await this.git.commit([...new Set(touched)], `Upgrade project layout to v${SCHEMA_VERSION} (legacy chapters now in ${LAYER_DIRS.legacy}/)`);
+  }
+
+  /**
    * Anything edited outside the app (in another editor, by a sync tool) is committed
    * on startup, so it is part of the recorded history before the app touches it.
    */
@@ -197,10 +252,11 @@ readable and complete without the application.
 | canon/                | Locked canon             | Import only. Changed only by author-confirmed proposals. |
 | directives/           | Author directives        | The author, by hand. Outranks canon and legacy text. |
 | working-ideas/        | Working ideas (not canon)| The author, by hand.                                |
+| historical/           | Pre-redevelopment summaries & continuity | Import only. Reference, not binding. |
 | manuscript/chapters/  | Draft manuscript         | The workspace editor.                               |
 | approved/             | Approved manuscript      | Only the explicit "Approve chapter" action.         |
 | archive/superseded/   | Superseded approved text | Moved here when a chapter is re-approved.           |
-| archive/legacy/       | Earlier approved chapters| Import only. Never governs new drafts.              |
+| archive/legacy-manuscript/ | Older chapter drafts | Import only. Never governs new drafts.              |
 | editorial/            | Comments, versions, approvals, proposals | The workspace.                     |
 
 Full version history: \`git log\` in this folder.

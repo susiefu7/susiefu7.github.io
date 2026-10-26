@@ -91,11 +91,11 @@ export async function writeJson(p: string, value: unknown): Promise<void> {
 }
 
 /** Create a file that must not already exist. Used for frozen copies (approved, superseded). */
-export async function writeNewFile(p: string, content: string): Promise<void> {
+export async function writeNewFile(p: string, content: string | Buffer): Promise<void> {
   await fs.mkdir(path.dirname(p), { recursive: true });
   const handle = await fs.open(p, 'wx');
   try {
-    await handle.writeFile(content, 'utf8');
+    await handle.writeFile(content);
     await handle.sync();
   } finally {
     await handle.close();

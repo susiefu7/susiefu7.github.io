@@ -69,6 +69,7 @@ export function App() {
   const [jump, setJump] = useState<{ offset: number; nonce: number } | null>(null);
   const [focus, setFocus] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [creatingChapter, setCreatingChapter] = useState(false);
   const [theme, setTheme] = useState<'day' | 'night'>(storedTheme);
   const [toast, setToast] = useState<{ message: string; kind: 'info' | 'error' } | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
@@ -186,9 +187,11 @@ export function App() {
           onNavigate={navigate}
           onScene={onScene}
           onToggleTheme={() => setTheme(theme === 'night' ? 'day' : 'night')}
-          onCreateChapter={async (title, number) => {
+          creating={creatingChapter}
+          setCreating={setCreatingChapter}
+          onCreateChapter={async (title, number, file) => {
             try {
-              const created = await api.createChapter(title, number);
+              const created = await api.createChapter(title, number, file?.markdown, file?.name);
               await refreshChapters();
               await navigate({ view: 'chapter', chapterId: created.meta.id });
             } catch (e) {
@@ -224,6 +227,7 @@ export function App() {
         )}
         {route.view === 'library' && (
           <LibraryView
+            redevelopment={project?.redevelopment ?? null}
             file={route.file}
             line={route.line}
             query={route.query}
@@ -234,9 +238,20 @@ export function App() {
         {route.view === 'proposals' && <ProposalsView onChanged={refreshChapters} />}
         {route.view === 'home' && (
           <div className="workspace">
-            <div className="empty-state">
-              {chapters.length === 0 ? 'No chapters yet. Add one with “+ Chapter”, or import existing drafts (see the README).' : 'Choose a chapter.'}
-            </div>
+            {chapters.length === 0 ? (
+              <div className="empty-state">
+                <p>The manuscript is empty.</p>
+                <p className="small">
+                  Create a chapter to begin drafting. Type or paste prose into it, or start from a .md, .txt or .docx file. The reference library is
+                  available in the meantime.
+                </p>
+                <button className="btn primary" onClick={() => setCreatingChapter(true)}>
+                  New chapter
+                </button>
+              </div>
+            ) : (
+              <div className="empty-state">Choose a chapter.</div>
+            )}
           </div>
         )}
       </div>

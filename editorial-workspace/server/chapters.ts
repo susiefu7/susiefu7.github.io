@@ -164,8 +164,17 @@ export async function saveChapter(
   });
 }
 
-export async function createChapter(project: Project, input: { title?: unknown; number?: unknown }): Promise<ChapterDocument> {
+/**
+ * Create a chapter, empty or from supplied text (pasted or converted from a file).
+ * A new chapter is always a working draft; nothing is approved by creating it.
+ */
+export async function createChapter(
+  project: Project,
+  input: { title?: unknown; number?: unknown; text?: unknown; source?: unknown },
+): Promise<ChapterDocument> {
   const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : 'Untitled chapter';
+  const text = typeof input.text === 'string' ? input.text : '';
+  const source = typeof input.source === 'string' && input.source.trim() ? path.basename(input.source.trim()) : null;
   return project.lock.run(async () => {
     const existing = await listChapters(project);
     const number =
@@ -175,9 +184,9 @@ export async function createChapter(project: Project, input: { title?: unknown; 
     const id = `ch${String(number).padStart(2, '0')}`;
     if (await chapterExists(project, id)) throw new HttpError(409, `Chapter ${number} already exists`);
     const meta: ChapterMeta = { id, number, title, status: 'drafting', createdAt: nowIso(), updatedAt: nowIso() };
-    await atomicWrite(project.abs(project.chapterText(id)), '');
+    await atomicWrite(project.abs(project.chapterText(id)), text);
     await writeJson(project.abs(project.chapterMeta(id)), meta);
-    await project.git.commit([project.chapterDir(id)], `Add chapter: ${id} — ${title}`);
+    await project.git.commit([project.chapterDir(id)], `Add chapter: ${id} — ${title}${source ? ` (text imported from ${source})` : ''}`);
     return getChapter(project, id);
   });
 }

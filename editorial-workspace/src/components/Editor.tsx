@@ -1,7 +1,8 @@
 // Plain-text Markdown editor. A native textarea keeps 8,000-word chapters responsive
 // and never reformats the author's text.
 
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, type ClipboardEvent } from 'react';
+import { htmlToMarkdown, plainTextToMarkdown } from '../paste';
 
 export interface EditorHandle {
   select: (start: number, end: number) => void;
@@ -60,6 +61,26 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ value, o
     if (jump) select(jump.offset, jump.offset);
   }, [jump]);
 
+  // Prose pasted from Word, Google Docs or the web keeps its paragraphs and emphasis.
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const html = e.clipboardData.getData('text/html');
+    const plain = e.clipboardData.getData('text/plain');
+    let md = html ? htmlToMarkdown(html) : null;
+    if (md === null && plain && !/^\s*[>#-]/m.test(plain)) {
+      const converted = plainTextToMarkdown(plain);
+      if (converted !== plain) md = converted;
+    }
+    if (md === null || md === plain) return; // let the browser paste as usual
+    e.preventDefault();
+    const el = ta.current!;
+    // insertText keeps the browser's undo history (Ctrl/⌘ Z undoes the paste).
+    if (!document.execCommand('insertText', false, md)) {
+      const { selectionStart: s, selectionEnd: t } = el;
+      onChange(el.value.slice(0, s) + md + el.value.slice(t));
+      requestAnimationFrame(() => el.setSelectionRange(s + md!.length, s + md!.length));
+    }
+  };
+
   const report = () => {
     const el = ta.current;
     if (el) onSelectionChange({ start: el.selectionStart, end: el.selectionEnd });
@@ -75,6 +96,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({ value, o
         lang="en-GB"
         aria-label="Chapter text (Markdown)"
         onChange={(e) => onChange(e.target.value)}
+        onPaste={onPaste}
         onSelect={report}
         onKeyUp={report}
         onMouseUp={report}

@@ -17,11 +17,14 @@ const target = path.resolve(here, '../.demo-project');
 
 await main(async () => {
   if (!(await exists(target))) {
-    const project = await Project.init(target, 'Sample Manuscript (demo data)', 'Author');
+    const project = await Project.init(target, 'Sample Manuscript (demo data)', 'Author', {
+      redevelopment: 'Sample: the story is being redeveloped. Older summaries, continuity records and drafts are historical.',
+    });
     await importReference(project, path.join(sample, 'canon'), 'canon');
     await importReference(project, path.join(sample, 'directives'), 'directive');
     await importReference(project, path.join(sample, 'working-ideas'), 'idea');
-    await importReference(project, path.join(sample, 'legacy'), 'legacy');
+    await importReference(project, path.join(sample, 'historical'), 'historical');
+    await importReference(project, path.join(sample, 'legacy-manuscript'), 'legacy');
     await importChapters(project, path.join(sample, 'chapters'));
     console.log(`Demo project created at ${target}`);
   } else {

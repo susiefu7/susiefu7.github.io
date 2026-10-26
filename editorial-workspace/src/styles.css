@@ -24,6 +24,7 @@
   --l-approved: #2f5d50;
   --l-superseded: #857e72;
   --l-legacy: #857e72;
+  --l-historical: #8a6239;
 
   --hl: rgba(205, 165, 60, 0.2);
   --hl-line: rgba(176, 132, 30, 0.65);
@@ -67,6 +68,7 @@
   --l-approved: #8cbfae;
   --l-superseded: #918a7e;
   --l-legacy: #918a7e;
+  --l-historical: #d0a77c;
   --hl: rgba(216, 178, 101, 0.16);
   --hl-line: rgba(216, 178, 101, 0.55);
   --hl-active: rgba(216, 178, 101, 0.32);
@@ -322,6 +324,56 @@ a {
 .badge.approved { color: var(--l-approved); }
 .badge.superseded { color: var(--l-superseded); }
 .badge.legacy { color: var(--l-legacy); border-style: dotted; }
+.badge.historical { color: var(--l-historical); border-style: dotted; }
+
+/* Redevelopment and draft status */
+
+.redev {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--l-historical);
+  border: 1px dotted currentColor;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.redev-note {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  background: var(--warn-bg);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  margin-bottom: 14px;
+}
+
+.draft-mark {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--l-draft);
+  white-space: nowrap;
+}
+
+.edit-strip {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px max(24px, calc((100% - 38rem) / 2));
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--rule);
+}
+
+.block {
+  display: block;
+}
 
 /* ── Buttons & fields ──────────────────────────────────────────────────── */
 

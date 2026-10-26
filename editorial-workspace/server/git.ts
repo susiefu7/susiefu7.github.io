@@ -61,8 +61,10 @@ export class Git {
 
   /** Stage exactly these paths and commit them. Returns null when nothing changed. */
   async commit(paths: string[], message: string): Promise<string | null> {
-    // Optional files (e.g. a chapter with no comments yet) may not exist; skip them.
-    paths = paths.filter((p) => existsSync(path.join(this.cwd, p)));
+    // Optional files (e.g. a chapter with no comments yet) may not exist; skip them —
+    // unless Git tracks them, in which case their removal (e.g. a move) must be recorded.
+    const tracked = (await this.run(['ls-files', '-z', '--', ...paths])).split('\0').filter(Boolean);
+    paths = paths.filter((p) => existsSync(path.join(this.cwd, p)) || tracked.some((t) => t === p || t.startsWith(`${p}/`)));
     if (paths.length === 0) return null;
     await this.run(['add', '--all', '--', ...paths]);
     try {

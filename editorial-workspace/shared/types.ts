@@ -10,21 +10,23 @@ export type Layer =
   | 'canon' // 1. Locked canon — imported reference files. Read-only in the app.
   | 'directive' // Author directives for the redevelopment; they outrank older material.
   | 'idea' // 2. Working ideas — author notes, explicitly NOT canon.
+  | 'historical' // Summaries and continuity records from before the redevelopment. Reference only.
   | 'suggestion' // 3. Editorial suggestions — comments and proposals, never applied automatically.
   | 'draft' // 4. Draft manuscript — the working text of each chapter.
   | 'approved' // 5. Approved manuscript — copies frozen at the moment of approval.
   | 'superseded' // 6. Superseded approved versions from this redevelopment.
-  | 'legacy'; // 6. Previously approved chapters from the earlier development. Never governing.
+  | 'legacy'; // 6. Older chapter drafts from the earlier development. Never governing.
 
 export const LAYER_LABELS: Record<Layer, string> = {
   canon: 'Locked canon',
   directive: 'Author directive',
   idea: 'Working idea — not canon',
+  historical: 'Historical reference — pre-redevelopment',
   suggestion: 'Editorial suggestion',
   draft: 'Draft manuscript',
   approved: 'Approved manuscript',
   superseded: 'Superseded version',
-  legacy: 'Legacy archive — does not govern',
+  legacy: 'Legacy manuscript — does not govern',
 };
 
 export type WorkingStatus = 'planning' | 'drafting' | 'revising' | 'in-review';
@@ -195,7 +197,8 @@ export interface ReferenceFile {
   path: string; // project-relative, e.g. "canon/characters.md"
   name: string;
   layer: Layer;
-  searchable: boolean; // false for binary formats (e.g. .docx) stored but not indexed
+  searchable: boolean; // false for formats the workspace cannot read (e.g. .pdf)
+  converted: boolean; // true for .docx: shown and searched via a read-only conversion
   size: number;
   integrity: 'verified' | 'changed' | 'untracked' | 'n/a';
 }
@@ -233,10 +236,18 @@ export interface CanonProposal {
   targetHashAtCreation: string | null;
 }
 
+/** While a redevelopment is active, older records are shown as historical, not binding. */
+export interface Redevelopment {
+  active: boolean;
+  since: string | null;
+  note: string;
+}
+
 export interface ProjectInfo {
   title: string;
   path: string;
   schemaVersion: number;
   authorName: string;
   aiEnabled: boolean;
+  redevelopment: Redevelopment | null;
 }

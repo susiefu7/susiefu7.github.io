@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CanonReference, ChapterDocument, CommentCategory, EditorialComment, SearchHit } from '../../shared/types';
 import { WORKING_STATUSES } from '../../shared/types';
+import { countWords } from '../../shared/text';
 import { ApiError, api } from '../api';
 import { Modal, STATUS_LABELS, errorMessage, formatCount, formatDate, useNotify } from '../ui';
 import { ApprovalDialog } from './ApprovalDialog';
 import { CommentsPanel, type Composer } from './CommentsPanel';
 import { ContinuityPanel } from './ContinuityPanel';
 import { DiffView } from './DiffView';
+import { FilePicker, type PickedFile } from './FilePicker';
 import { Editor, type EditorHandle } from './Editor';
 import { Reader, type ReaderSelection } from './Reader';
 
@@ -52,7 +54,7 @@ export function ChapterView(props: Props) {
   const [readSel, setReadSel] = useState<ReaderSelection | null>(null);
   const [editSel, setEditSel] = useState({ start: 0, end: 0 });
   const [panel, setPanel] = useState<'notes' | 'continuity' | null>('notes');
-  const [modal, setModal] = useState<'version' | 'approve' | 'recovery' | null>(null);
+  const [modal, setModal] = useState<'version' | 'approve' | 'recovery' | 'import' | null>(null);
   const [pendingAccept, setPendingAccept] = useState<EditorialComment | null>(null);
   const [jump, setJump] = useState<{ offset: number; nonce: number } | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -99,6 +101,8 @@ export function ChapterView(props: Props) {
         if (cancelled) return;
         adopt(d, { replaceBuffer: true });
         setComments(c);
+        // An empty chapter opens ready for writing (without changing the saved preference).
+        if (!d.text.trim()) setModeState('edit');
       } catch (e) {
         if (!cancelled) setLoadError(errorMessage(e));
       }
@@ -430,7 +434,20 @@ export function ChapterView(props: Props) {
             )}
           </div>
         ) : (
-          <Editor ref={editor} value={buffer} onChange={setBuffer} onSelectionChange={setEditSel} jump={jump} />
+          <>
+            <div className="edit-strip">
+              <span>
+                Chapter {doc.meta.number} · {doc.meta.title}
+              </span>
+              <span>{formatCount(countWords(buffer))} words</span>
+              <DraftMark doc={doc} />
+              {!buffer.trim() && <span className="muted">Type or paste prose below, or import a .md, .txt or .docx file.</span>}
+              <button className="btn ghost small" style={{ marginLeft: 'auto' }} onClick={() => setModal('import')} title="Bring in prose from a .md, .txt or .docx file">
+                Import file…
+              </button>
+            </div>
+            <Editor ref={editor} value={buffer} onChange={setBuffer} onSelectionChange={setEditSel} jump={jump} />
+          </>
         )}
       </div>
 
@@ -499,6 +516,28 @@ export function ChapterView(props: Props) {
         </aside>
       )}
 
+      {modal === 'import' && (
+        <ImportIntoChapterModal
+          hasText={buffer.trim().length > 0}
+          busy={busy}
+          onClose={() => setModal(null)}
+          onImport={async (file, how) => {
+            const saved = await save();
+            if (!saved) return;
+            await withBusy(async () => {
+              if (how === 'replace' && saved.text.trim()) {
+                await api.createVersion(chapterId, `Before importing “${file.name}”`, 'Created automatically before the draft was replaced by an imported file.');
+              }
+              const next = how === 'append' && saved.text.trim() ? `${saved.text.replace(/\s*$/, '')}\n\n${file.markdown}` : file.markdown;
+              adopt(await api.save(chapterId, next, saved.hash), { replaceBuffer: true });
+              await loadComments();
+              onChaptersChanged();
+              setModal(null);
+              notify(how === 'replace' && saved.text.trim() ? `Imported “${file.name}”. The previous draft is kept as a named version.` : `Imported “${file.name}”.`);
+            });
+          }}
+        />
+      )}
       {modal === 'version' && (
         <NameVersionModal
           dirty={dirty}
@@ -630,14 +669,64 @@ function Header({
             </option>
           ))}
         </select>
-        {doc.approval && (
-          <span className={`status ${doc.draftMatchesApproved ? 'approved' : 'diverged'}`}>
-            <span className="dot" />
-            {doc.draftMatchesApproved ? `Approved ${formatDate(doc.approval.date, false)}` : 'Draft differs from approved text'}
-          </span>
-        )}
+        <DraftMark doc={doc} />
       </div>
     </header>
+  );
+}
+
+/** Makes the chapter's standing unmistakable: a working draft is never canon. */
+function DraftMark({ doc }: { doc: ChapterDocument }) {
+  if (!doc.approval) return <span className="draft-mark">Working draft · not approved canon</span>;
+  return (
+    <span className={`status ${doc.draftMatchesApproved ? 'approved' : 'diverged'}`}>
+      <span className="dot" />
+      {doc.draftMatchesApproved ? `Approved ${formatDate(doc.approval.date, false)}` : 'Draft differs from approved text'}
+    </span>
+  );
+}
+
+function ImportIntoChapterModal({
+  hasText,
+  busy,
+  onClose,
+  onImport,
+}: {
+  hasText: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onImport: (file: PickedFile, how: 'replace' | 'append') => Promise<void>;
+}) {
+  const [file, setFile] = useState<PickedFile | null>(null);
+  const [how, setHow] = useState<'replace' | 'append'>(hasText ? 'append' : 'replace');
+  return (
+    <Modal title="Import prose into this chapter" onClose={onClose} wide>
+      <p className="hint">
+        Choose a .md, .txt or .docx file. Word files are converted to Markdown, keeping paragraphs, italics, bold and headings. The file itself is not changed.
+        The imported text becomes part of the working draft, not approved canon.
+      </p>
+      <FilePicker onPicked={setFile} />
+      {hasText && (
+        <>
+          <label className="check">
+            <input type="radio" name="how" checked={how === 'append'} onChange={() => setHow('append')} />
+            <span>Add it after the current draft.</span>
+          </label>
+          <label className="check">
+            <input type="radio" name="how" checked={how === 'replace'} onChange={() => setHow('replace')} />
+            <span>Replace the current draft. The current text is kept as a named version first.</span>
+          </label>
+        </>
+      )}
+      <div className="row end">
+        <button className="btn" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn primary" disabled={!file || !file.markdown.trim() || busy} onClick={() => file && onImport(file, how)}>
+          Import
+        </button>
+      </div>
+    </Modal>
   );
 }
 

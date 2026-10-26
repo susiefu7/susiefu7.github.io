@@ -17,14 +17,17 @@ export interface TestWorkspace {
   close: () => Promise<void>;
 }
 
-export async function makeWorkspace(): Promise<TestWorkspace> {
+export async function makeWorkspace(options: { empty?: boolean; redevelopment?: string } = {}): Promise<TestWorkspace> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tlp-test-'));
-  const project = await Project.init(path.join(root, 'project'), 'Test Project', 'Author');
-  await importReference(project, path.join(SAMPLE, 'canon'), 'canon');
-  await importReference(project, path.join(SAMPLE, 'directives'), 'directive');
-  await importReference(project, path.join(SAMPLE, 'working-ideas'), 'idea');
-  await importReference(project, path.join(SAMPLE, 'legacy'), 'legacy');
-  await importChapters(project, path.join(SAMPLE, 'chapters'));
+  const project = await Project.init(path.join(root, 'project'), 'Test Project', 'Author', { redevelopment: options.redevelopment });
+  if (!options.empty) {
+    await importReference(project, path.join(SAMPLE, 'canon'), 'canon');
+    await importReference(project, path.join(SAMPLE, 'directives'), 'directive');
+    await importReference(project, path.join(SAMPLE, 'working-ideas'), 'idea');
+    await importReference(project, path.join(SAMPLE, 'historical'), 'historical');
+    await importReference(project, path.join(SAMPLE, 'legacy-manuscript'), 'legacy');
+    await importChapters(project, path.join(SAMPLE, 'chapters'));
+  }
 
   const server = createApp(project).listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
@@ -33,8 +36,8 @@ export async function makeWorkspace(): Promise<TestWorkspace> {
   const api: TestWorkspace['api'] = async (method, url, body, headers = {}) => {
     const res = await fetch(base + url, {
       method,
-      headers: { 'Content-Type': 'application/json', 'X-Workspace': '1', ...headers },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { 'Content-Type': Buffer.isBuffer(body) ? 'application/octet-stream' : 'application/json', 'X-Workspace': '1', ...headers },
+      body: body === undefined ? undefined : Buffer.isBuffer(body) ? new Uint8Array(body) : JSON.stringify(body),
     });
     const text = await res.text();
     let data: any = text;

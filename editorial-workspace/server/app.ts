@@ -30,6 +30,8 @@ import { acceptSuggestion, confirmAnchor, createComment, reattachComment, replyT
 import { exportManuscript } from './export.ts';
 import { HttpError } from './fsutil.ts';
 import type { Project } from './project.ts';
+import { convertToMarkdown } from './convert.ts';
+import { reclassifyReferenceFile, uploadReferenceFile } from './importer.ts';
 import { listReferenceFiles, readReferenceFile, search } from './reference.ts';
 import { createVersion, listVersions, readVersionText, restoreVersion } from './versions.ts';
 
@@ -62,6 +64,8 @@ export function createApp(project: Project, options: { staticDir?: string } = {}
   });
 
   const r = express.Router();
+  const raw = express.raw({ type: 'application/octet-stream', limit: '30mb' });
+  const q = (req: Request, name: string) => (typeof req.query[name] === 'string' ? (req.query[name] as string) : '');
   const p = (req: Request, name: string) => String(req.params[name]);
 
   r.get('/project', json(async () => project.info(getAssistant().available)));
@@ -97,7 +101,12 @@ export function createApp(project: Project, options: { staticDir?: string } = {}
   r.post('/proposals/:pid/reject', json((req) => rejectProposal(project, p(req, 'pid'))));
   r.post('/proposals/:pid/apply', json((req) => applyProposal(project, p(req, 'pid'), req.body ?? {})));
 
+  // Converts an uploaded .md/.txt/.docx to chapter Markdown. Writes nothing.
+  r.post('/convert', raw, json(async (req) => convertToMarkdown(q(req, 'name'), Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0))));
+
   r.get('/reference', json(() => listReferenceFiles(project)));
+  r.post('/reference/upload', raw, json((req) => uploadReferenceFile(project, q(req, 'layer'), q(req, 'name'), req.body)));
+  r.post('/reference/move', json((req) => reclassifyReferenceFile(project, req.body ?? {})));
   r.get('/reference/file', json((req) => readReferenceFile(project, req.query.path)));
   r.get(
     '/search',

@@ -1,4 +1,4 @@
-# Chapter Summaries (SAMPLE DATA)
+# Chapter Summaries — pre-redevelopment (SAMPLE DATA)
 
 ## Chapter 1: The Return
 

@@ -25,6 +25,7 @@ const SHORT_LABELS: Record<Layer, string> = {
   canon: 'Canon',
   directive: 'Directive',
   idea: 'Idea · not canon',
+  historical: 'Historical',
   suggestion: 'Suggestion',
   draft: 'Draft',
   approved: 'Approved',
@@ -62,7 +63,7 @@ export function formatCount(n: number): string {
 
 export const STATUS_LABELS: Record<string, string> = {
   planning: 'Planning',
-  drafting: 'Drafting',
+  drafting: 'Working draft',
   revising: 'Revising',
   'in-review': 'In review',
 };

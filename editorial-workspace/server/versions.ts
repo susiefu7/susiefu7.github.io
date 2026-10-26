@@ -7,6 +7,7 @@ import type { ChapterDocument, NamedVersion, VersionEntry, VersionKind } from '.
 import { assertBaseHash, getChapter, readDraft, readMeta, writeDraftAndCommit } from './chapters.ts';
 import { HttpError, exists, newId, nowIso, readJson, readText, resolveInside, sha256, walkFiles, writeJson } from './fsutil.ts';
 import { LAYER_DIRS, type Project } from './project.ts';
+import { READABLE_EXT, readableText } from './reference.ts';
 
 export async function readNamedVersions(project: Project, id: string): Promise<NamedVersion[]> {
   return readJson<NamedVersion[]>(project.abs(project.versionsFile(id)), []);
@@ -103,8 +104,8 @@ export async function listVersions(project: Project, id: string): Promise<Versio
   const legacyRoot = project.abs(LAYER_DIRS.legacy!);
   for (const file of await walkFiles(legacyRoot)) {
     const rel = path.relative(legacyRoot, file).split(path.sep).join('/');
-    if (!/\.(md|markdown|txt)$/i.test(rel)) continue;
-    entries.push({ ref: `legacy:${rel}`, label: `Legacy — ${rel}`, date: null, layer: 'legacy', kind: 'legacy', named: null, commit: null, restorable: true });
+    if (!READABLE_EXT.test(rel)) continue;
+    entries.push({ ref: `legacy:${rel}`, label: `Legacy manuscript — ${rel}`, date: null, layer: 'legacy', kind: 'legacy', named: null, commit: null, restorable: true });
   }
   return entries;
 }
@@ -128,7 +129,8 @@ export async function readVersionText(project: Project, id: string, ref: unknown
     const base = project.abs(kind === 'superseded' ? project.supersededDir(id) : LAYER_DIRS.legacy!);
     const file = resolveInside(base, value);
     if (!(await exists(file))) throw new HttpError(404, 'File not found');
-    return { text: await readText(file), label: `${kind === 'legacy' ? 'Legacy' : 'Superseded'} — ${value}` };
+    const text = kind === 'legacy' ? (await readableText(file)).text : await readText(file);
+    return { text, label: `${kind === 'legacy' ? 'Legacy manuscript' : 'Superseded'} — ${value}` };
   }
   throw new HttpError(400, `Unknown version reference: ${ref}`);
 }

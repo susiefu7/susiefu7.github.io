@@ -1,13 +1,18 @@
-// The reference library: canon, directives, working ideas and archives.
-// Read-only in the application. Canon changes only through confirmed proposals.
+// The reference library: canon, directives, working ideas, historical records and
+// archives. Read-only here (see importer.ts for adding and reclassifying files).
+// Canon text changes only through confirmed proposals.
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Layer, ReferenceFile, SearchHit, SearchResult } from '../shared/types.ts';
+import { referenceText } from './convert.ts';
 import { HttpError, exists, readJson, readText, sha256, walkFiles } from './fsutil.ts';
 import { CHAPTERS_DIR, LAYER_DIRS, type Project } from './project.ts';
 
+/** Plain-text files: the only kind a canon proposal may append to. */
 export const TEXT_EXT = /\.(md|markdown|txt)$/i;
+/** Files the library can display and search (.docx through a read-only conversion). */
+export const READABLE_EXT = /\.(md|markdown|txt|docx)$/i;
 
 export interface ManifestEntry {
   sha256: string;
@@ -16,6 +21,8 @@ export interface ManifestEntry {
   source: string;
   /** Set when an author-confirmed proposal changed the file after import. */
   updates?: { date: string; proposalId: string; sha256: string }[];
+  /** Author-confirmed moves between layers (e.g. canon → historical). */
+  moves?: { date: string; from: string; to: string }[];
 }
 
 export interface Manifest {
@@ -26,7 +33,25 @@ export async function readManifest(project: Project): Promise<Manifest> {
   return readJson<Manifest>(project.abs(project.manifestFile), { files: {} });
 }
 
-const BROWSABLE: Layer[] = ['canon', 'directive', 'idea', 'approved', 'superseded', 'legacy'];
+export const BROWSABLE: Layer[] = ['canon', 'directive', 'idea', 'historical', 'approved', 'superseded', 'legacy'];
+
+const textCache = new Map<string, { hash: string; text: string; converted: boolean; warnings: string[] }>();
+
+/** The readable text of a library file. A .docx is converted in memory; the file is untouched. */
+export async function readableText(abs: string): Promise<{ text: string; converted: boolean; warnings: string[] }> {
+  const bytes = await fs.readFile(abs);
+  const hash = sha256(bytes);
+  const cached = textCache.get(abs);
+  if (cached && cached.hash === hash) return cached;
+  let result;
+  try {
+    result = referenceText(abs, bytes);
+  } catch (e) {
+    throw new HttpError(422, `${path.basename(abs)} could not be read: ${e instanceof Error ? e.message : e}`);
+  }
+  textCache.set(abs, { hash, ...result });
+  return result;
+}
 
 function toRel(project: Project, abs: string): string {
   return path.relative(project.root, abs).split(path.sep).join('/');
@@ -40,34 +65,44 @@ export async function listReferenceFiles(project: Project): Promise<ReferenceFil
       const rel = toRel(project, abs);
       const stat = await fs.stat(abs);
       let integrity: ReferenceFile['integrity'] = 'n/a';
-      if (layer === 'canon' || layer === 'legacy') {
-        const entry = manifest.files[rel];
-        if (!entry) integrity = 'untracked';
-        else {
-          const expected = entry.updates?.at(-1)?.sha256 ?? entry.sha256;
-          integrity = sha256(await fs.readFile(abs)) === expected ? 'verified' : 'changed';
-        }
+      const entry = manifest.files[rel];
+      if (entry) {
+        const expected = entry.updates?.at(-1)?.sha256 ?? entry.sha256;
+        integrity = sha256(await fs.readFile(abs)) === expected ? 'verified' : 'changed';
+      } else if (layer === 'canon' || layer === 'historical' || layer === 'legacy') {
+        integrity = 'untracked';
       }
-      out.push({ path: rel, name: path.basename(rel), layer, searchable: TEXT_EXT.test(rel), size: stat.size, integrity });
+      out.push({
+        path: rel,
+        name: path.basename(rel),
+        layer,
+        searchable: READABLE_EXT.test(rel),
+        converted: /\.docx$/i.test(rel),
+        size: stat.size,
+        integrity,
+      });
     }
   }
   return out;
 }
 
 /** Read a reference file. Only folders in the reference library are reachable. */
-export async function readReferenceFile(project: Project, rel: unknown): Promise<{ path: string; layer: Layer; content: string; hash: string }> {
+export async function readReferenceFile(
+  project: Project,
+  rel: unknown,
+): Promise<{ path: string; layer: Layer; content: string; hash: string; converted: boolean; warnings: string[] }> {
   if (typeof rel !== 'string') throw new HttpError(400, 'Missing path');
   const abs = project.abs(rel);
   const normalised = toRel(project, abs);
   const layer = project.layerOf(normalised);
   if (!layer || !BROWSABLE.includes(layer)) throw new HttpError(403, 'Not a reference file');
-  if (!TEXT_EXT.test(normalised)) throw new HttpError(415, 'This file is stored in the project but is not a text file the workspace can display.');
+  if (!READABLE_EXT.test(normalised)) throw new HttpError(415, 'This file is stored in the project, but the workspace can only display .md, .txt and .docx files.');
   if (!(await exists(abs))) throw new HttpError(404, 'File not found');
-  const content = await readText(abs);
-  return { path: normalised, layer, content, hash: sha256(content) };
+  const { text, converted, warnings } = await readableText(abs);
+  return { path: normalised, layer, content: text, hash: sha256(text), converted, warnings };
 }
 
-const AUTHORITY: Record<string, number> = { directive: 0, canon: 1, approved: 2, draft: 3, idea: 4, superseded: 5, legacy: 6 };
+const AUTHORITY: Record<string, number> = { directive: 0, canon: 1, approved: 2, draft: 3, idea: 4, historical: 5, superseded: 6, legacy: 7 };
 
 function tokenize(query: string): { phrases: string[] } {
   const phrases: string[] = [];
@@ -100,8 +135,16 @@ export async function search(project: Project, query: unknown, layers?: Layer[])
   }
 
   const hits: SearchHit[] = [];
-  for (const { rel, layer } of files) {
-    const lines = (await readText(project.abs(rel))).split('\n');
+  for (const { rel, layer } of [...files]) {
+    let text: string;
+    try {
+      text = layer === 'draft' ? await readText(project.abs(rel)) : (await readableText(project.abs(rel))).text;
+    } catch {
+      unsearchable.push(rel); // e.g. a damaged .docx — reported, never silently skipped
+      files.splice(files.findIndex((f) => f.rel === rel), 1);
+      continue;
+    }
+    const lines = text.split('\n');
     let heading: string | null = null;
     lines.forEach((line, i) => {
       const h = /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
@@ -136,8 +179,9 @@ export async function canonHeadings(project: Project): Promise<{ name: string; f
   const out: { name: string; file: string }[] = [];
   const seen = new Set<string>();
   for (const abs of await walkFiles(project.abs(LAYER_DIRS.canon!))) {
-    if (!TEXT_EXT.test(abs)) continue;
-    for (const line of (await readText(abs)).split('\n')) {
+    if (!READABLE_EXT.test(abs)) continue;
+    const text = await readableText(abs).then((r) => r.text, () => '');
+    for (const line of text.split('\n')) {
       const h = /^#{2,4}\s+(.+?)\s*#*\s*$/.exec(line);
       if (!h) continue;
       const name = h[1].replace(/[*_`]/g, '').trim();

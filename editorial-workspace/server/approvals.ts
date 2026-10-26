@@ -131,7 +131,9 @@ async function draftProposals(
   ].join('\n');
 
   const make = async (kind: CanonProposal['kind'], content: string, pattern: RegExp): Promise<CanonProposal> => {
-    const targetFile = (await findCanonFile(project, pattern)) ?? `canon/${kind === 'summary' ? 'chapter-summaries' : 'continuity'}-updates.md`;
+    // During a redevelopment the old summaries live in historical/, so new chapters get
+    // fresh canon files rather than being appended to pre-redevelopment records.
+    const targetFile = (await findCanonFile(project, pattern)) ?? `canon/${kind === 'summary' ? 'chapter-summaries' : 'continuity'}.md`;
     const existing = await readTextIfExists(project.abs(targetFile));
     const proposal: CanonProposal = {
       id: newId('p'),

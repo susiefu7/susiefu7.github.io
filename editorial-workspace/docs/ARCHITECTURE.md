@@ -41,7 +41,11 @@ sample contains no facts about *The Long Picture*.
   rewritten, and the project folder would be complete on its own. The project is
   always its own repository, even when placed inside another one.
 - **Few dependencies.** Runtime: `express`, `diff`, `marked`, `tsx`, and the Literata
-  font (bundled locally). The UI uses React with no state, routing or editor
+  font (bundled locally). Word files are read by a small built-in reader
+  (`server/docx.ts`: ZIP directory, `inflateRaw`, `word/document.xml`). It's tested
+  against files written by python-docx, pandoc and LibreOffice, and keeps
+  paragraphs, headings, lists, italics and bold. It reads tracked changes as
+  accepted, and warns about comments, footnotes, tables and images it doesn't import. The UI uses React with no state, routing or editor
   frameworks. The editor is a native `<textarea>`, which handles 8,000-word chapters
   without lag and never reformats the author's text.
 - **Server as gatekeeper.** Every rule that protects the manuscript is enforced by
@@ -55,11 +59,12 @@ sample contains no facts about *The Long Picture*.
 | 1. Locked canon                | `canon/`                         | Importer; afterwards only `applyProposal()`    |
 | — Author directives            | `directives/`                    | Importer / the author by hand                  |
 | 2. Working ideas               | `working-ideas/`                 | Importer / the author by hand                  |
+| — Historical reference         | `historical/`                    | Importer / **Add files…**; pre-redevelopment summaries and continuity records, not binding |
 | 3. Editorial suggestions       | `editorial/comments/`, `editorial/proposals/` | The workspace                       |
 | 4. Draft manuscript            | `manuscript/chapters/chNN/chapter.md` (+ `chapter.json`) | Editor saves, restores, accepted suggestions |
 | 5. Approved manuscript         | `approved/chNN.md`               | `approveChapter()` only                        |
 | 6. Superseded versions         | `archive/superseded/chNN/`, Git history | `approveChapter()` (create-only)        |
-| 6. Legacy approved chapters    | `archive/legacy/`                | Importer only; never governing                 |
+| 6. Legacy manuscript           | `archive/legacy-manuscript/`     | Importer / **Add files…**; older chapter drafts, never governing |
 
 Other files:
 
@@ -73,8 +78,24 @@ editorial/canon-manifest.json      SHA-256 of each imported canon/legacy file, p
 
 **Order of authority** (used when assembling context for an AI editor, and stated in
 its ground rules): author directives → locked canon → approved chapters. Drafts and
-working ideas are not established fact. Legacy text is excluded unless explicitly
-requested.
+working ideas are not established fact. Historical records and legacy drafts are
+excluded unless explicitly requested.
+
+**Redevelopment.** `project.json` can carry `"redevelopment": { "active": true,
+"since": "…", "note": "…" }`, which `npm run setup` sets. While it's active, the
+interface shows *Redevelopment in progress*, historical and legacy files carry a
+notice that they don't govern the new chapters, and an AI editor's ground rules say
+the same. New chapter summaries and continuity notes go to fresh files in `canon/`,
+via confirmed proposals, rather than being appended to the historical records.
+
+Files can be moved between canon, directive, idea, historical and legacy layers
+(`reclassifyReferenceFile`). That needs explicit confirmation, keeps the bytes and
+Git history (it's recorded as a rename), moves the manifest entry, and updates
+citations in editorial notes.
+
+**Layout upgrades.** Schema version 2 renamed `archive/legacy/` to
+`archive/legacy-manuscript/`. Opening an older project moves the folder with its
+history, rewrites the manifest keys and records the upgrade as one commit.
 
 ## Data model
 
@@ -173,7 +194,11 @@ All under `/api`. Mutations need `X-Workspace: 1`.
 | `GET/POST /chapters/:id/comments`, `PATCH …/:cid`, `POST …/:cid/replies`, `…/confirm-anchor`, `…/reattach`, `…/accept-suggestion` | Editorial notes |
 | `GET …/approvals` · `POST …/approve` | `{baseHash, note, confirm: true}` |
 | `GET /proposals`, `GET /proposals/targets`, `GET …/:pid/preview`, `PATCH …/:pid`, `POST …/:pid/reject`, `POST …/:pid/apply` | Canon proposals |
-| `GET /reference`, `GET /reference/file?path=`, `GET /search?q=&layers=` | Library |
+| `GET /reference`, `GET /reference/file?path=`, `GET /search?q=&layers=` | Library (`.docx` shown via read-only conversion) |
+| `POST /reference/upload?layer=&name=` (raw bytes) | Add a reference file, create-only |
+| `POST /reference/move` | `{path, to, confirm: true}` — reclassify between layers |
+| `POST /convert?name=` (raw bytes) | `.md`/`.txt`/`.docx` → chapter Markdown preview; writes nothing |
+| `POST /chapters` | `{title, number, text?, source?}` — new working-draft chapter, optionally with imported text |
 | `GET /export?which=draft|approved` | Whole manuscript as Markdown |
 
 ## Source map
@@ -182,13 +207,14 @@ All under `/api`. Mutations need `X-Workspace: 1`.
 shared/   types.ts · text.ts (words, scenes, offset-preserving tokenizer) · anchor.ts · diff.ts
 server/   project.ts (layout, layers) · fsutil.ts · git.ts · chapters.ts · versions.ts
           comments.ts · commentStore.ts · approvals.ts · reference.ts · importer.ts
-          export.ts · app.ts (HTTP) · index.ts · ai/{types,context,index}.ts
-src/      App.tsx · api.ts · ui.tsx · markdown.ts · styles.css
+          export.ts · docx.ts · convert.ts · app.ts (HTTP) · index.ts · ai/{types,context,index}.ts
+src/      App.tsx · api.ts · ui.tsx · markdown.ts · paste.ts (rich paste → Markdown) · styles.css
           components/ Sidebar · ChapterView · Reader · Editor · CommentsPanel
                       ContinuityPanel · ReferencePicker · HistoryView · DiffView
-                      LibraryView · ProposalsView · ApprovalDialog
-scripts/  init-project · import · backup · export · demo · dev
-tests/    text · anchor · diff · workspace (end-to-end over HTTP and real Git)
+                      LibraryView · ProposalsView · ApprovalDialog · FilePicker
+scripts/  setup · init-project · import · backup · export · demo · dev
+tests/    text · anchor · diff · workspace · redevelopment (end-to-end over HTTP and real Git)
+          fixtures/ — .docx files from three producers, with the script that makes them
 ```
 
 ## Future AI editor
@@ -220,6 +246,6 @@ reviewing dialogue, pacing or psychology are the same pattern with a different
 - Rich-text (WYSIWYG) editing. The text stays Markdown so it remains portable.
 - Writing to working ideas or directives from the app. Edit those files in any
   text editor; the workspace records the change on its next start.
-- Reading `.docx` or `.pdf` reference files. They're stored and listed; convert them
-  to Markdown to make them searchable.
+- Reading `.pdf` reference files. They're stored and listed but not searchable;
+  convert them to Markdown or Word to make them readable.
 - Any AI provider (see above).

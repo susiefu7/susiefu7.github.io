@@ -24,10 +24,11 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+  const binary = body instanceof ArrayBuffer;
   const res = await fetch(`/api${url}`, {
     method,
-    headers: { 'Content-Type': 'application/json', 'X-Workspace': '1' },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: { 'Content-Type': binary ? 'application/octet-stream' : 'application/json', 'X-Workspace': '1' },
+    body: body === undefined ? undefined : binary ? body : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`);
@@ -36,12 +37,29 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 
 const enc = encodeURIComponent;
 
+export interface ConvertedFile {
+  markdown: string;
+  warnings: string[];
+  format: 'markdown' | 'text' | 'docx';
+  words: number;
+}
+
+export interface ImportReport {
+  copied: string[];
+  alreadyPresent: string[];
+  conflicts: string[];
+  notes: string[];
+}
+
 export const api = {
   project: () => request<ProjectInfo>('GET', '/project'),
 
   chapters: () => request<ChapterSummary[]>('GET', '/chapters'),
   chapter: (id: string) => request<ChapterDocument>('GET', `/chapters/${id}`),
-  createChapter: (title: string, number?: number) => request<ChapterDocument>('POST', '/chapters', { title, number }),
+  createChapter: (title: string, number?: number, text?: string, source?: string) =>
+    request<ChapterDocument>('POST', '/chapters', { title, number, text, source }),
+  /** Converts a .md/.txt/.docx file to chapter Markdown on the server. Nothing is saved. */
+  convert: (name: string, bytes: ArrayBuffer) => request<ConvertedFile>('POST', `/convert?name=${enc(name)}`, bytes),
   save: (id: string, text: string, baseHash: string) => request<ChapterDocument>('PUT', `/chapters/${id}`, { text, baseHash }),
   updateMeta: (id: string, patch: { title?: string; status?: string }) => request<ChapterDocument>('PATCH', `/chapters/${id}/meta`, patch),
   writeRecovery: (id: string, text: string) => request<void>('PUT', `/chapters/${id}/recovery`, { text }),
@@ -77,6 +95,10 @@ export const api = {
     request<CanonProposal>('POST', `/proposals/${pid}/apply`, { confirm: true, expectedTargetHash }),
 
   referenceFiles: () => request<ReferenceFile[]>('GET', '/reference'),
-  referenceFile: (path: string) => request<{ path: string; layer: Layer; content: string }>('GET', `/reference/file?path=${enc(path)}`),
+  referenceFile: (path: string) =>
+    request<{ path: string; layer: Layer; content: string; converted: boolean; warnings: string[] }>('GET', `/reference/file?path=${enc(path)}`),
+  uploadReference: (layer: Layer, name: string, bytes: ArrayBuffer) =>
+    request<ImportReport>('POST', `/reference/upload?layer=${enc(layer)}&name=${enc(name)}`, bytes),
+  moveReference: (path: string, to: Layer) => request<{ path: string; layer: Layer }>('POST', '/reference/move', { path, to, confirm: true }),
   search: (q: string, layers?: Layer[]) => request<SearchResult>('GET', `/search?q=${enc(q)}${layers ? `&layers=${layers.join(',')}` : ''}`),
 };
